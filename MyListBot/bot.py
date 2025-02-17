@@ -71,12 +71,12 @@ def get_user_list(user_id: str, filter_value: str = None):
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
-# --- Initialisation du bot Discord et de l'arbre des commandes slash ---
+# --- Initialisation du bot Discord et des commandes slash ---
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# Commande : /add
+# Commande individuelle pour ajouter un contenu
 @tree.command(name="add", description="Ajoute un contenu à ta liste.")
 @app_commands.describe(
     title="Titre du contenu",
@@ -93,7 +93,7 @@ async def add(interaction: discord.Interaction, title: str, category: str, statu
     add_content(str(interaction.user.id), title, category.lower(), status.lower())
     await interaction.response.send_message(f"Ajouté : **{title}** ({category.lower()}) avec le statut **{status.lower()}**.")
 
-# Commande : /remove
+# Commande individuelle pour supprimer un contenu
 @tree.command(name="remove", description="Supprime un contenu de ta liste.")
 @app_commands.describe(
     title="Titre du contenu à supprimer"
@@ -102,7 +102,7 @@ async def remove(interaction: discord.Interaction, title: str):
     remove_content(str(interaction.user.id), title)
     await interaction.response.send_message(f"Supprimé : **{title}**.")
 
-# Commande : /update
+# Commande individuelle pour mettre à jour le statut d'un contenu
 @tree.command(name="update", description="Modifie le statut d'un contenu dans ta liste.")
 @app_commands.describe(
     title="Titre du contenu à mettre à jour",
@@ -115,10 +115,10 @@ async def update(interaction: discord.Interaction, title: str, status: str):
     update_content_status(str(interaction.user.id), title, status.lower())
     await interaction.response.send_message(f"Mise à jour : **{title}** est maintenant **{status.lower()}**.")
 
-# Commande : /mylist
+# Commande pour afficher sa propre liste
 @tree.command(name="mylist", description="Affiche ta liste de contenus.")
 @app_commands.describe(
-    filter="(Optionnel) Filtre par une catégorie (webtoon, série, manga, anime) ou par un statut (à voir/lire, en cours, terminé)"
+    filter="(Optionnel) Filtre par une catégorie ou par un statut"
 )
 async def mylist(interaction: discord.Interaction, filter: str = None):
     rows = get_user_list(str(interaction.user.id), filter)
@@ -141,7 +141,7 @@ async def mylist(interaction: discord.Interaction, filter: str = None):
             message += f"- **{title}** | {category} | {status}\n"
     await interaction.response.send_message(message)
 
-# Commande : /listuser
+# Commande pour afficher la liste d'un autre utilisateur
 @tree.command(name="listuser", description="Affiche la liste d'un autre utilisateur.")
 @app_commands.describe(
     user="Mentionne l'utilisateur",
@@ -168,15 +168,12 @@ async def listuser(interaction: discord.Interaction, user: discord.User, filter:
             message += f"- **{title}** | {category} | {status}\n"
     await interaction.response.send_message(message)
 
-# --- Nouvelles commandes pour opérations multiples avec séparation par virgules et point-virgule ---
-
-# Commande : /addmulti
-@tree.command(name="addmulti", description="Ajoute plusieurs contenus en une fois. Chaque entrée doit être au format: titre, catégorie, statut. Sépare les entrées par un point-virgule (;).")
+# Commande pour ajouter plusieurs contenus d'un coup
+@tree.command(name="addmulti", description="Ajoute plusieurs contenus. Chaque entrée doit être au format: titre, catégorie, statut. Sépare les entrées par un point-virgule (;).")
 @app_commands.describe(
-    entries="Liste des contenus, par exemple: One Piece, manga, en cours; Naruto, manga, terminé"
+    entries="Exemple: One Piece, manga, en cours; Naruto, manga, terminé"
 )
 async def addmulti(interaction: discord.Interaction, entries: str):
-    # Sépare les entrées par le point-virgule
     items = [item.strip() for item in entries.split(";") if item.strip()]
     added = []
     errors = []
@@ -204,10 +201,10 @@ async def addmulti(interaction: discord.Interaction, entries: str):
         msg += "Erreurs:\n" + "\n".join(errors)
     await interaction.response.send_message(msg)
 
-# Commande : /updatemulti
-@tree.command(name="updatemulti", description="Met à jour le statut de plusieurs contenus en une fois. Chaque entrée doit être au format: titre, nouveau statut. Sépare les entrées par un point-virgule (;).")
+# Commande pour mettre à jour plusieurs contenus d'un coup
+@tree.command(name="updatemulti", description="Met à jour plusieurs contenus. Chaque entrée doit être au format: titre, nouveau statut. Sépare les entrées par un point-virgule (;).")
 @app_commands.describe(
-    updates="Liste des mises à jour, par exemple: One Piece, terminé; Naruto, en cours"
+    updates="Exemple: One Piece, terminé; Naruto, en cours"
 )
 async def updatemulti(interaction: discord.Interaction, updates: str):
     items = [item.strip() for item in updates.split(";") if item.strip()]
@@ -234,13 +231,12 @@ async def updatemulti(interaction: discord.Interaction, updates: str):
         msg += "Erreurs:\n" + "\n".join(errors)
     await interaction.response.send_message(msg)
 
-# Commande : /removemulti
-@tree.command(name="removemulti", description="Supprime plusieurs contenus en une fois. Fournis une liste de titres séparés par des virgules.")
+# Commande pour supprimer plusieurs contenus d'un coup
+@tree.command(name="removemulti", description="Supprime plusieurs contenus. Fournis une liste de titres séparés par des virgules.")
 @app_commands.describe(
-    titles="Liste des titres à supprimer, par exemple: One Piece, Naruto, Demon Slayer"
+    titles="Exemple: One Piece, Naruto, Demon Slayer"
 )
 async def removemulti(interaction: discord.Interaction, titles: str):
-    # Sépare les titres par des virgules
     items = [item.strip() for item in titles.split(",") if item.strip()]
     removed = []
     errors = []
@@ -259,7 +255,7 @@ async def removemulti(interaction: discord.Interaction, titles: str):
 
 @client.event
 async def on_ready():
-    await tree.sync()
+    await tree.sync()  # Synchronisation globale des commandes slash
     print(f"{client.user} est connecté et les commandes slash sont synchronisées.")
 
 client.run(DISCORD_TOKEN)
