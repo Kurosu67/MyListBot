@@ -9,9 +9,9 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ------------------------------
-# Fonctions PostgreSQL
-# ------------------------------
+# ---------------------------------------------------------------------
+# 1) Fonctions PostgreSQL
+# ---------------------------------------------------------------------
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -26,90 +26,44 @@ def add_content(user_id: str, title: str, category: str, status: str):
     cur.close()
     conn.close()
 
-# ------------------------------
-# Données possibles
-# ------------------------------
+# ---------------------------------------------------------------------
+# 2) Données globales (catégories, statuts, stockage temporaire)
+# ---------------------------------------------------------------------
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
-# ------------------------------
-# Stockage temporaire en mémoire
-# user_id -> liste de (title, category, status)
-# ------------------------------
+# Stockage en mémoire des contenus en attente d'ajout
+# Clé : user_id (int), Valeur : liste de tuples (title, category, status)
 pending_adds = {}
 
-# ------------------------------
-# Vues et Composants
-# ------------------------------
+# ---------------------------------------------------------------------
+# 3) Création du client et du CommandTree
+# ---------------------------------------------------------------------
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-class AddMultiView(discord.ui.View):
-    """
-    Vue affichée après la commande /addmulti.
-    Propose 2 boutons : "Ajouter un contenu" et "Terminer".
-    """
-    def __init__(self, user_id: int):
-        super().__init__(timeout=300)  # 5 minutes de timeout
-        self.user_id = user_id
+# ---------------------------------------------------------------------
+# 4) Classes pour les Vues et les Modals
+# ---------------------------------------------------------------------
 
-    @discord.ui.button(label="Ajouter un contenu", style=discord.ButtonStyle.primary)
-    async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Vérifie que c'est bien l'utilisateur qui a lancé la commande
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Vous n'êtes pas l'utilisateur qui a lancé cette commande.", ephemeral=True)
-            return
-
-        # On crée et envoie une petite vue (TitleCategoryStatusView)
-        view = TitleCategoryStatusView(self.user_id)
-        await interaction.response.send_message("Veuillez renseigner le contenu à ajouter :", view=view, ephemeral=True)
-
-    @discord.ui.button(label="Terminer", style=discord.ButtonStyle.success)
-    async def finish_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Vérifie que c'est bien l'utilisateur
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Vous n'êtes pas l'utilisateur qui a lancé cette commande.", ephemeral=True)
-            return
-
-        # Récupère la liste en attente
-        user_id_str = str(self.user_id)
-        if user_id_str not in pending_adds or not pending_adds[user_id_str]:
-            await interaction.response.send_message("Aucun contenu en attente à enregistrer.", ephemeral=True)
-            return
-
-        # Enregistre tout en base
-        items = pending_adds[user_id_str]
-        for (title, cat, stat) in items:
-            add_content(user_id_str, title, cat, stat)
-
-        nb = len(items)
-        # Vide la liste
-        pending_adds[user_id_str] = []
-
-        await interaction.response.send_message(f"{nb} contenu(s) ajouté(s) en base !", ephemeral=True)
-        # On peut désactiver la vue
-        self.disable_all_items()
-        await interaction.edit_original_response(view=self)
-
+class TitleModal(discord.ui.Modal, title="Saisir un titre"):
+    title_input = discord.ui.TextInput(
+        label="Titre",
+        placeholder="Ex: One Piece",
+        required=True
+    )
+    async def on_submit(self, interaction: discord.Interaction):
+        # On ne répond rien ici, la vue parent va récupérer la valeur
+        await interaction.response.defer(ephemeral=True)
 
 class TitleCategoryStatusView(discord.ui.View):
     """
     Vue pour saisir un Titre, choisir la Catégorie et le Statut.
-    On utilise 3 Selects/TextInputs ou un mix.
-    Pour l'exemple, on va faire un TextInput pour le titre
-    et deux Select pour la catégorie et le statut.
     """
-
     def __init__(self, user_id: int):
         super().__init__(timeout=180)
         self.user_id = user_id
-
-        # Ajout d'un TextInput via un Modal est possible, 
-        # mais on peut aussi demander le titre directement via un "Select" custom
-        # ou un "Modal". Pour simplifier, on va tout mettre dans la vue sous forme d'interactions successives.
-        #
-        # ICI : on utilise 3 children successifs. 
-        # -> Pour un meilleur usage, on pourrait recourir à un Modal (ex: "Enter the title" -> text input).
-        # -> Mais on va illustrer un approach "Select" + "Confirm" button.
-
         self.title_entered = None
         self.category_selected = None
         self.status_selected = None
@@ -119,7 +73,6 @@ class TitleCategoryStatusView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("Vous n'êtes pas l'utilisateur concerné.", ephemeral=True)
             return
-
         modal = TitleModal()
         await interaction.response.send_modal(modal)
         # On attend la fin du Modal
@@ -167,59 +120,92 @@ class TitleCategoryStatusView(discord.ui.View):
 
     @discord.ui.button(label="Valider", style=discord.ButtonStyle.primary)
     async def validate_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # On vérifie qu'on a bien tout
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Vous n'êtes pas l'utilisateur concerné.", ephemeral=True)
+            return
+
         if not self.title_entered or not self.category_selected or not self.status_selected:
             await interaction.response.send_message(
                 "Veuillez saisir le titre, la catégorie et le statut avant de valider.",
                 ephemeral=True
             )
             return
-        # On stocke dans pending_adds
+
         user_id_str = str(self.user_id)
-        if user_id_str not in pending_adds:
-            pending_adds[user_id_str] = []
-        pending_adds[user_id_str].append((self.title_entered, self.category_selected, self.status_selected))
+        pending_adds.setdefault(user_id_str, []).append(
+            (self.title_entered, self.category_selected, self.status_selected)
+        )
 
         await interaction.response.send_message(
-            f"Contenu enregistré en attente : **{self.title_entered}** ({self.category_selected} / {self.status_selected}).\n"
-            "Vous pouvez fermer cette fenêtre ou ajouter d'autres contenus en cliquant à nouveau sur « Ajouter un contenu ».",
+            f"Contenu en attente : **{self.title_entered}** ({self.category_selected}/{self.status_selected}).\n"
+            "Vous pouvez fermer cette fenêtre ou ajouter d'autres contenus via le bouton «Ajouter un contenu».",
             ephemeral=True
         )
-        # On désactive cette vue après validation
         self.disable_all_items()
         await interaction.edit_original_response(view=self)
 
-class TitleModal(discord.ui.Modal, title="Saisir un titre"):
-    title_input = discord.ui.TextInput(label="Titre", placeholder="Ex: One Piece", required=True)
+class AddMultiView(discord.ui.View):
+    """
+    Vue affichée après la commande /addmulti.
+    Propose 2 boutons : "Ajouter un contenu" et "Terminer".
+    """
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)  # 5 minutes
+        self.user_id = user_id
 
-    async def on_submit(self, interaction: discord.Interaction):
-        # Pas besoin de faire grand-chose, on récupère la valeur dans la vue parent
-        await interaction.response.defer(ephemeral=True)
+    @discord.ui.button(label="Ajouter un contenu", style=discord.ButtonStyle.primary)
+    async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Vous n'êtes pas l'utilisateur qui a lancé la commande.", ephemeral=True)
+            return
 
-# ------------------------------
-# Commande /addmulti
-# ------------------------------
+        view = TitleCategoryStatusView(self.user_id)
+        await interaction.response.send_message("Veuillez renseigner le contenu :", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Terminer", style=discord.ButtonStyle.success)
+    async def finish_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Vous n'êtes pas l'utilisateur qui a lancé la commande.", ephemeral=True)
+            return
+
+        user_id_str = str(self.user_id)
+        if user_id_str not in pending_adds or not pending_adds[user_id_str]:
+            await interaction.response.send_message("Aucun contenu en attente.", ephemeral=True)
+            return
+
+        items = pending_adds[user_id_str]
+        for (title, cat, stat) in items:
+            add_content(user_id_str, title, cat, stat)
+
+        nb = len(items)
+        pending_adds[user_id_str] = []  # on vide la liste
+
+        await interaction.response.send_message(f"{nb} contenu(s) ajouté(s) en base !", ephemeral=True)
+        self.disable_all_items()
+        await interaction.edit_original_response(view=self)
+
+# ---------------------------------------------------------------------
+# 5) Commande /addmulti
+# ---------------------------------------------------------------------
 @tree.command(name="addmulti", description="Ajoute plusieurs contenus (un par un) avec choix pour catégorie/statut.")
 async def addmulti(interaction: discord.Interaction):
     user_id = interaction.user.id
-    # On crée une vue qui propose "Ajouter un contenu" et "Terminer"
     view = AddMultiView(user_id)
     await interaction.response.send_message(
-        "Cliquez sur « Ajouter un contenu » pour saisir vos entrées, puis sur « Terminer » pour valider en base.",
+        "Cliquez sur «Ajouter un contenu» pour saisir vos entrées, puis «Terminer» pour valider.",
         view=view,
         ephemeral=True
     )
 
-# ------------------------------
-# Setup du bot
-# ------------------------------
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
-
+# ---------------------------------------------------------------------
+# 6) Événement on_ready
+# ---------------------------------------------------------------------
 @client.event
 async def on_ready():
     await tree.sync()
     print(f"{client.user} est connecté et les commandes slash sont synchronisées.")
 
+# ---------------------------------------------------------------------
+# 7) Lancement du bot
+# ---------------------------------------------------------------------
 client.run(DISCORD_TOKEN)
