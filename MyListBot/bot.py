@@ -127,7 +127,6 @@ async def mylist(interaction: discord.Interaction, filter: str = None):
         return
     message = ""
     if not filter:
-        # Regrouper par catégorie
         grouped = {}
         for title, category, status in rows:
             grouped.setdefault(category, []).append((title, status))
@@ -169,21 +168,22 @@ async def listuser(interaction: discord.Interaction, user: discord.User, filter:
             message += f"- **{title}** | {category} | {status}\n"
     await interaction.response.send_message(message)
 
-# --- Nouvelles commandes pour opérations multiples ---
+# --- Nouvelles commandes pour opérations multiples avec séparation par virgules et point-virgule ---
 
 # Commande : /addmulti
-@tree.command(name="addmulti", description="Ajoute plusieurs contenus en une seule commande. Chaque ligne doit contenir: titre | catégorie | statut.")
+@tree.command(name="addmulti", description="Ajoute plusieurs contenus en une fois. Chaque entrée doit être au format: titre, catégorie, statut. Sépare les entrées par un point-virgule (;).")
 @app_commands.describe(
-    contents="Liste de contenus, un par ligne, avec les champs séparés par '|'"
+    entries="Liste des contenus, par exemple: One Piece, manga, en cours; Naruto, manga, terminé"
 )
-async def addmulti(interaction: discord.Interaction, contents: str):
-    lines = contents.strip().splitlines()
+async def addmulti(interaction: discord.Interaction, entries: str):
+    # Sépare les entrées par le point-virgule
+    items = [item.strip() for item in entries.split(";") if item.strip()]
     added = []
     errors = []
-    for line in lines:
-        parts = [part.strip() for part in line.split("|")]
+    for item in items:
+        parts = [part.strip() for part in item.split(",")]
         if len(parts) != 3:
-            errors.append(f"Ligne invalide (doit contenir 3 champs): {line}")
+            errors.append(f"L'entrée invalide (doit contenir 3 champs): {item}")
             continue
         title, category, status = parts
         if category.lower() not in CATEGORIES:
@@ -205,18 +205,18 @@ async def addmulti(interaction: discord.Interaction, contents: str):
     await interaction.response.send_message(msg)
 
 # Commande : /updatemulti
-@tree.command(name="updatemulti", description="Met à jour le statut de plusieurs contenus en une seule commande. Chaque ligne doit contenir: titre | nouveau statut.")
+@tree.command(name="updatemulti", description="Met à jour le statut de plusieurs contenus en une fois. Chaque entrée doit être au format: titre, nouveau statut. Sépare les entrées par un point-virgule (;).")
 @app_commands.describe(
-    updates="Liste de mises à jour, un par ligne, avec les champs séparés par '|'"
+    updates="Liste des mises à jour, par exemple: One Piece, terminé; Naruto, en cours"
 )
 async def updatemulti(interaction: discord.Interaction, updates: str):
-    lines = updates.strip().splitlines()
+    items = [item.strip() for item in updates.split(";") if item.strip()]
     updated = []
     errors = []
-    for line in lines:
-        parts = [part.strip() for part in line.split("|")]
+    for item in items:
+        parts = [part.strip() for part in item.split(",")]
         if len(parts) != 2:
-            errors.append(f"Ligne invalide (doit contenir 2 champs): {line}")
+            errors.append(f"L'entrée invalide (doit contenir 2 champs): {item}")
             continue
         title, new_status = parts
         if new_status.lower() not in STATUTS:
@@ -235,18 +235,16 @@ async def updatemulti(interaction: discord.Interaction, updates: str):
     await interaction.response.send_message(msg)
 
 # Commande : /removemulti
-@tree.command(name="removemulti", description="Supprime plusieurs contenus en une seule commande. Fournis une liste de titres, un par ligne.")
+@tree.command(name="removemulti", description="Supprime plusieurs contenus en une fois. Fournis une liste de titres séparés par des virgules.")
 @app_commands.describe(
-    titles="Liste des titres à supprimer, un par ligne"
+    titles="Liste des titres à supprimer, par exemple: One Piece, Naruto, Demon Slayer"
 )
 async def removemulti(interaction: discord.Interaction, titles: str):
-    lines = titles.strip().splitlines()
+    # Sépare les titres par des virgules
+    items = [item.strip() for item in titles.split(",") if item.strip()]
     removed = []
     errors = []
-    for line in lines:
-        title = line.strip()
-        if not title:
-            continue
+    for title in items:
         try:
             remove_content(str(interaction.user.id), title)
             removed.append(title)
