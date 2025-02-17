@@ -80,6 +80,11 @@ def get_user_list(user_id: str, filter_value: str = None):
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
+# Stockage temporaire pour opérations multi
+pending_adds = {}      # user_id (str) -> list of (title, category, status)
+pending_updates = {}   # user_id (str) -> list of (title, new_status)
+pending_removes = {}   # user_id (str) -> list of titles
+
 # ------------------------------
 # Initialisation du client et du CommandTree
 # ------------------------------
@@ -190,18 +195,13 @@ async def listuser(interaction: discord.Interaction, user: discord.User, filter:
 # Commandes multi via modales et vues interactives
 # -------------------------------------------------------
 
-# Stockage temporaire pour les opérations multi
-pending_adds = {}      # user_id (str) -> list of (title, category, status)
-pending_updates = {}   # user_id (str) -> list of (title, new_status)
-pending_removes = {}   # user_id (str) -> list of titles
-
-# Modal pour la saisie du titre (utilisé dans addmulti)
+# Modal pour saisir le titre dans le multi-add
 class TitleModal(discord.ui.Modal, title="Saisir un titre"):
     title_input = discord.ui.TextInput(label="Titre", placeholder="Ex: One Piece", required=True)
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
-# Vue interactive pour saisir titre, catégorie et statut
+# Vue interactive pour saisir Titre, Catégorie et Statut
 class TitleCategoryStatusView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=180)
@@ -213,16 +213,16 @@ class TitleCategoryStatusView(discord.ui.View):
     @discord.ui.button(label="Saisir Titre", style=discord.ButtonStyle.secondary)
     async def enter_title(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         modal = TitleModal()
         await interaction.response.send_modal(modal)
         timed_out = await modal.wait()
         if timed_out:
-            await interaction.followup.send("Délai dépassé pour la saisie du titre.", ephemeral=True)
+            await interaction.followup.send("Délai dépassé pour la saisie du titre.", ephemeral=False)
             return
         self.title_entered = modal.title_input.value
-        await interaction.followup.send(f"Titre enregistré : **{self.title_entered}**", ephemeral=True)
+        await interaction.followup.send(f"Titre enregistré : **{self.title_entered}**", ephemeral=False)
 
     @discord.ui.select(
         placeholder="Choisir la catégorie",
@@ -232,10 +232,10 @@ class TitleCategoryStatusView(discord.ui.View):
     )
     async def category_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         self.category_selected = select.values[0]
-        await interaction.response.send_message(f"Catégorie sélectionnée : {self.category_selected}", ephemeral=True)
+        await interaction.response.send_message(f"Catégorie sélectionnée : {self.category_selected}", ephemeral=False)
 
     @discord.ui.select(
         placeholder="Choisir le statut",
@@ -245,27 +245,26 @@ class TitleCategoryStatusView(discord.ui.View):
     )
     async def status_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         self.status_selected = select.values[0]
-        await interaction.response.send_message(f"Statut sélectionné : {self.status_selected}", ephemeral=True)
+        await interaction.response.send_message(f"Statut sélectionné : {self.status_selected}", ephemeral=False)
 
     @discord.ui.button(label="Valider", style=discord.ButtonStyle.primary)
     async def validate_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         if not self.title_entered or not self.category_selected or not self.status_selected:
-            await interaction.response.send_message("Veuillez remplir tous les champs.", ephemeral=True)
+            await interaction.response.send_message("Veuillez remplir tous les champs.", ephemeral=False)
             return
         user_id_str = str(self.user_id)
         pending_adds.setdefault(user_id_str, []).append((self.title_entered, self.category_selected, self.status_selected))
-        await interaction.response.send_message(
-            f"Contenu enregistré en attente : **{self.title_entered}** ({self.category_selected}/{self.status_selected}).",
-            ephemeral=True
+        # Ici, on édite le message pour afficher une confirmation et retirer la vue interactive
+        await interaction.edit_original_response(
+            content=f"Contenu enregistré en attente : **{self.title_entered}** ({self.category_selected}/{self.status_selected}).",
+            view=None
         )
-        self.disable_all_items()
-        await interaction.edit_original_response(view=self)
 
 # Vue pour la commande /addmulti
 class AddMultiView(discord.ui.View):
@@ -276,26 +275,26 @@ class AddMultiView(discord.ui.View):
     @discord.ui.button(label="Ajouter un contenu", style=discord.ButtonStyle.primary)
     async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         view = TitleCategoryStatusView(self.user_id)
-        await interaction.response.send_message("Veuillez saisir le contenu :", view=view, ephemeral=True)
+        await interaction.response.send_message("Veuillez saisir le contenu :", view=view, ephemeral=False)
 
     @discord.ui.button(label="Terminer", style=discord.ButtonStyle.success)
     async def finish_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Non autorisé.", ephemeral=True)
+            await interaction.response.send_message("Non autorisé.", ephemeral=False)
             return
         user_id_str = str(self.user_id)
         if user_id_str not in pending_adds or not pending_adds[user_id_str]:
-            await interaction.response.send_message("Aucun contenu en attente.", ephemeral=True)
+            await interaction.response.send_message("Aucun contenu en attente.", ephemeral=False)
             return
         items = pending_adds[user_id_str]
         for (title, cat, stat) in items:
             add_content(user_id_str, title, cat, stat)
         nb = len(items)
         pending_adds[user_id_str] = []
-        await interaction.response.send_message(f"{nb} contenu(s) ajouté(s) en base !", ephemeral=True)
+        await interaction.response.send_message(f"{nb} contenu(s) ajouté(s) en base !", ephemeral=False)
         self.disable_all_items()
         await interaction.edit_original_response(view=self)
 
@@ -305,10 +304,12 @@ async def addmulti(interaction: discord.Interaction):
     await interaction.response.send_message(
         "Cliquez sur 'Ajouter un contenu' pour saisir vos entrées, puis sur 'Terminer' pour valider.",
         view=view,
-        ephemeral=True
+        ephemeral=False
     )
 
-# Modal pour multi update
+# ------------------------------
+# Commande multi update via modal
+# ------------------------------
 class UpdateMultiModal(discord.ui.Modal, title="Mise à jour multiple"):
     updates = discord.ui.TextInput(
         label="Mises à jour",
@@ -328,7 +329,7 @@ class UpdateMultiModal(discord.ui.Modal, title="Mise à jour multiple"):
             if new_status.lower() not in STATUTS:
                 continue
             pending_updates[user_id_str].append((title, new_status.lower()))
-        await interaction.response.send_message("Mises à jour enregistrées en attente. Utilisez /updatemultifinish pour valider.", ephemeral=True)
+        await interaction.response.send_message("Mises à jour enregistrées en attente. Utilisez /updatemultifinish pour valider.", ephemeral=False)
 
 @tree.command(name="updatemulti", description="Enregistre plusieurs mises à jour via une modal.")
 async def updatemulti(interaction: discord.Interaction):
@@ -339,15 +340,17 @@ async def updatemulti(interaction: discord.Interaction):
 async def updatemultifinish(interaction: discord.Interaction):
     user_id_str = str(interaction.user.id)
     if user_id_str not in pending_updates or not pending_updates[user_id_str]:
-        await interaction.response.send_message("Aucune mise à jour en attente.", ephemeral=True)
+        await interaction.response.send_message("Aucune mise à jour en attente.", ephemeral=False)
         return
     for title, new_status in pending_updates[user_id_str]:
         update_content_status(user_id_str, title, new_status)
     nb = len(pending_updates[user_id_str])
     pending_updates[user_id_str] = []
-    await interaction.response.send_message(f"{nb} mise(s) à jour effectuée(s).", ephemeral=True)
+    await interaction.response.send_message(f"{nb} mise(s) à jour effectuée(s).", ephemeral=False)
 
-# Modal pour multi remove
+# ------------------------------
+# Commande multi remove via modal
+# ------------------------------
 class RemoveMultiModal(discord.ui.Modal, title="Suppression multiple"):
     titles = discord.ui.TextInput(
         label="Titres à supprimer",
@@ -363,7 +366,7 @@ class RemoveMultiModal(discord.ui.Modal, title="Suppression multiple"):
             title = line.strip()
             if title:
                 pending_removes[user_id_str].append(title)
-        await interaction.response.send_message("Titres enregistrés en attente de suppression. Utilisez /removemultifinish pour valider.", ephemeral=True)
+        await interaction.response.send_message("Titres enregistrés en attente de suppression. Utilisez /removemultifinish pour valider.", ephemeral=False)
 
 @tree.command(name="removemulti", description="Enregistre plusieurs suppressions via une modal.")
 async def removemulti(interaction: discord.Interaction):
@@ -374,13 +377,13 @@ async def removemulti(interaction: discord.Interaction):
 async def removemultifinish(interaction: discord.Interaction):
     user_id_str = str(interaction.user.id)
     if user_id_str not in pending_removes or not pending_removes[user_id_str]:
-        await interaction.response.send_message("Aucun contenu en attente de suppression.", ephemeral=True)
+        await interaction.response.send_message("Aucun contenu en attente de suppression.", ephemeral=False)
         return
     for title in pending_removes[user_id_str]:
         remove_content(user_id_str, title)
     nb = len(pending_removes[user_id_str])
     pending_removes[user_id_str] = []
-    await interaction.response.send_message(f"{nb} suppression(s) effectuée(s).", ephemeral=True)
+    await interaction.response.send_message(f"{nb} suppression(s) effectuée(s).", ephemeral=False)
 
 # ------------------------------
 # Événement on_ready avec synchronisation par guilde
