@@ -6,15 +6,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Récupérer les variables d'environnement
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Connexion à la base de données PostgreSQL
+# --- Fonctions de connexion à PostgreSQL ---
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
-
-# Fonctions CRUD en base
 
 def add_content(user_id: str, title: str, category: str, status: str):
     conn = get_connection()
@@ -70,16 +67,16 @@ def get_user_list(user_id: str, filter_value: str = None):
     conn.close()
     return rows
 
-# Définir les catégories et statuts possibles
+# --- Définition des catégories et statuts ---
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
-# Création du bot et de l'arbre de commandes slash
+# --- Initialisation du bot Discord et de l'arbre des commandes slash ---
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# Commande pour ajouter un contenu
+# Commande : /add
 @tree.command(name="add", description="Ajoute un contenu à ta liste.")
 @app_commands.describe(
     title="Titre du contenu",
@@ -88,24 +85,24 @@ tree = app_commands.CommandTree(client)
 )
 async def add(interaction: discord.Interaction, title: str, category: str, status: str):
     if category.lower() not in CATEGORIES:
-        await interaction.response.send_message(f"Catégorie invalide. Choisis parmi : {', '.join(CATEGORIES)}.", ephemeral=True)
+        await interaction.response.send_message(f"Catégorie invalide. Choisis parmi : {', '.join(CATEGORIES)}.")
         return
     if status.lower() not in STATUTS:
-        await interaction.response.send_message(f"Statut invalide. Choisis parmi : {', '.join(STATUTS)}.", ephemeral=True)
+        await interaction.response.send_message(f"Statut invalide. Choisis parmi : {', '.join(STATUTS)}.")
         return
     add_content(str(interaction.user.id), title, category.lower(), status.lower())
-    await interaction.response.send_message(f"Ajouté : **{title}** ({category.lower()}) avec le statut **{status.lower()}**.", ephemeral=True)
+    await interaction.response.send_message(f"Ajouté : **{title}** ({category.lower()}) avec le statut **{status.lower()}**.")
 
-# Commande pour supprimer un contenu
+# Commande : /remove
 @tree.command(name="remove", description="Supprime un contenu de ta liste.")
 @app_commands.describe(
     title="Titre du contenu à supprimer"
 )
 async def remove(interaction: discord.Interaction, title: str):
     remove_content(str(interaction.user.id), title)
-    await interaction.response.send_message(f"Supprimé : **{title}**.", ephemeral=True)
+    await interaction.response.send_message(f"Supprimé : **{title}**.")
 
-# Commande pour mettre à jour le statut d'un contenu
+# Commande : /update
 @tree.command(name="update", description="Modifie le statut d'un contenu dans ta liste.")
 @app_commands.describe(
     title="Titre du contenu à mettre à jour",
@@ -113,12 +110,12 @@ async def remove(interaction: discord.Interaction, title: str):
 )
 async def update(interaction: discord.Interaction, title: str, status: str):
     if status.lower() not in STATUTS:
-        await interaction.response.send_message(f"Statut invalide. Choisis parmi : {', '.join(STATUTS)}.", ephemeral=True)
+        await interaction.response.send_message(f"Statut invalide. Choisis parmi : {', '.join(STATUTS)}.")
         return
     update_content_status(str(interaction.user.id), title, status.lower())
-    await interaction.response.send_message(f"Mise à jour : **{title}** est maintenant **{status.lower()}**.", ephemeral=True)
+    await interaction.response.send_message(f"Mise à jour : **{title}** est maintenant **{status.lower()}**.")
 
-# Commande pour afficher sa propre liste
+# Commande : /mylist
 @tree.command(name="mylist", description="Affiche ta liste de contenus.")
 @app_commands.describe(
     filter="(Optionnel) Filtre par une catégorie (webtoon, série, manga, anime) ou par un statut (à voir/lire, en cours, terminé)"
@@ -126,7 +123,7 @@ async def update(interaction: discord.Interaction, title: str, status: str):
 async def mylist(interaction: discord.Interaction, filter: str = None):
     rows = get_user_list(str(interaction.user.id), filter)
     if not rows:
-        await interaction.response.send_message("Aucun contenu trouvé.", ephemeral=True)
+        await interaction.response.send_message("Aucun contenu trouvé.")
         return
     message = ""
     if not filter:
@@ -142,39 +139,4 @@ async def mylist(interaction: discord.Interaction, filter: str = None):
     else:
         message = f"Résultats pour le filtre **{filter}** :\n"
         for title, category, status in rows:
-            message += f"- **{title}** | {category} | {status}\n"
-    await interaction.response.send_message(message, ephemeral=True)
-
-# Commande pour afficher la liste d'un autre utilisateur
-@tree.command(name="listuser", description="Affiche la liste d'un autre utilisateur.")
-@app_commands.describe(
-    user="Mentionne l'utilisateur",
-    filter="(Optionnel) Filtre par une catégorie ou un statut"
-)
-async def listuser(interaction: discord.Interaction, user: discord.User, filter: str = None):
-    rows = get_user_list(str(user.id), filter)
-    if not rows:
-        await interaction.response.send_message(f"Aucun contenu trouvé pour {user.display_name}.", ephemeral=True)
-        return
-    message = f"Liste de **{user.display_name}** :\n"
-    if not filter:
-        grouped = {}
-        for title, category, status in rows:
-            grouped.setdefault(category, []).append((title, status))
-        for cat in CATEGORIES:
-            if cat in grouped:
-                message += f"**{cat.capitalize()}**:\n"
-                for title, status in grouped[cat]:
-                    message += f"- **{title}** | {status}\n"
-    else:
-        message += f"(Filtre : {filter})\n"
-        for title, category, status in rows:
-            message += f"- **{title}** | {category} | {status}\n"
-    await interaction.response.send_message(message, ephemeral=True)
-
-@client.event
-async def on_ready():
-    await tree.sync()
-    print(f"{client.user} est connecté et les commandes slash sont synchronisées.")
-
-client.run(DISCORD_TOKEN)
+       
