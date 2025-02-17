@@ -9,7 +9,6 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# --- Fonctions de connexion à PostgreSQL ---
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -67,16 +66,13 @@ def get_user_list(user_id: str, filter_value: str = None):
     conn.close()
     return rows
 
-# --- Définition des catégories et statuts ---
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
-# --- Initialisation du bot Discord et de l'arbre des commandes slash ---
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# Commande : /add
 @tree.command(name="add", description="Ajoute un contenu à ta liste.")
 @app_commands.describe(
     title="Titre du contenu",
@@ -93,7 +89,6 @@ async def add(interaction: discord.Interaction, title: str, category: str, statu
     add_content(str(interaction.user.id), title, category.lower(), status.lower())
     await interaction.response.send_message(f"Ajouté : **{title}** ({category.lower()}) avec le statut **{status.lower()}**.")
 
-# Commande : /remove
 @tree.command(name="remove", description="Supprime un contenu de ta liste.")
 @app_commands.describe(
     title="Titre du contenu à supprimer"
@@ -102,7 +97,6 @@ async def remove(interaction: discord.Interaction, title: str):
     remove_content(str(interaction.user.id), title)
     await interaction.response.send_message(f"Supprimé : **{title}**.")
 
-# Commande : /update
 @tree.command(name="update", description="Modifie le statut d'un contenu dans ta liste.")
 @app_commands.describe(
     title="Titre du contenu à mettre à jour",
@@ -115,7 +109,6 @@ async def update(interaction: discord.Interaction, title: str, status: str):
     update_content_status(str(interaction.user.id), title, status.lower())
     await interaction.response.send_message(f"Mise à jour : **{title}** est maintenant **{status.lower()}**.")
 
-# Commande : /mylist
 @tree.command(name="mylist", description="Affiche ta liste de contenus.")
 @app_commands.describe(
     filter="(Optionnel) Filtre par une catégorie (webtoon, série, manga, anime) ou par un statut (à voir/lire, en cours, terminé)"
@@ -127,7 +120,6 @@ async def mylist(interaction: discord.Interaction, filter: str = None):
         return
     message = ""
     if not filter:
-        # Regrouper par catégorie
         grouped = {}
         for title, category, status in rows:
             grouped.setdefault(category, []).append((title, status))
@@ -139,4 +131,38 @@ async def mylist(interaction: discord.Interaction, filter: str = None):
     else:
         message = f"Résultats pour le filtre **{filter}** :\n"
         for title, category, status in rows:
-       
+            message += f"- **{title}** | {category} | {status}\n"
+    await interaction.response.send_message(message)
+
+@tree.command(name="listuser", description="Affiche la liste d'un autre utilisateur.")
+@app_commands.describe(
+    user="Mentionne l'utilisateur",
+    filter="(Optionnel) Filtre par une catégorie ou un statut"
+)
+async def listuser(interaction: discord.Interaction, user: discord.User, filter: str = None):
+    rows = get_user_list(str(user.id), filter)
+    if not rows:
+        await interaction.response.send_message(f"Aucun contenu trouvé pour {user.display_name}.")
+        return
+    message = f"Liste de **{user.display_name}** :\n"
+    if not filter:
+        grouped = {}
+        for title, category, status in rows:
+            grouped.setdefault(category, []).append((title, status))
+        for cat in CATEGORIES:
+            if cat in grouped:
+                message += f"**{cat.capitalize()}**:\n"
+                for title, status in grouped[cat]:
+                    message += f"- **{title}** | {status}\n"
+    else:
+        message += f"(Filtre : {filter})\n"
+        for title, category, status in rows:
+            message += f"- **{title}** | {category} | {status}\n"
+    await interaction.response.send_message(message)
+
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"{client.user} est connecté et les commandes slash sont synchronisées.")
+
+client.run(DISCORD_TOKEN)
