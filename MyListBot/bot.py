@@ -9,7 +9,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# --- Fonctions d'accès à la base PostgreSQL ---
+# --- Fonctions d'accès à PostgreSQL ---
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -67,7 +67,7 @@ def get_user_list(user_id: str, filter_value: str = None):
     conn.close()
     return rows
 
-# --- Définitions des catégories et statuts acceptés ---
+# --- Définition des catégories et statuts acceptés ---
 CATEGORIES = ["webtoon", "série", "manga", "anime"]
 STATUTS = ["à voir/lire", "en cours", "terminé"]
 
@@ -165,94 +165,123 @@ async def listuser(interaction: discord.Interaction, user: discord.User, filter:
             message += f"- **{title}** | {category} | {status}\n"
     await interaction.response.send_message(message)
 
-# Commandes pour opérations multiples
+# --- Modales pour les opérations multiples ---
 
-@tree.command(name="addmulti", description="Ajoute plusieurs contenus d'un coup. Chaque entrée doit être au format: titre, catégorie, statut. Sépare les entrées par un point-virgule (;).")
-@app_commands.describe(
-    entries="Exemple: One Piece, manga, en cours; Naruto, manga, terminé; Demon Slayer, anime, à voir/lire"
-)
-async def addmulti(interaction: discord.Interaction, entries: str):
-    items = [item.strip() for item in entries.split(";") if item.strip()]
-    added = []
-    errors = []
-    for item in items:
-        parts = [part.strip() for part in item.split(",")]
-        if len(parts) != 3:
-            errors.append(f"L'entrée invalide (doit contenir 3 champs): {item}")
-            continue
-        title, category, status = parts
-        if category.lower() not in CATEGORIES:
-            errors.append(f"Catégorie invalide pour '{title}': {category}")
-            continue
-        if status.lower() not in STATUTS:
-            errors.append(f"Statut invalide pour '{title}': {status}")
-            continue
-        try:
-            add_content(str(interaction.user.id), title, category.lower(), status.lower())
-            added.append(title)
-        except Exception as e:
-            errors.append(f"Erreur pour '{title}': {str(e)}")
-    msg = ""
-    if added:
-        msg += "Ajoutés : " + ", ".join(added) + ".\n"
-    if errors:
-        msg += "Erreurs :\n" + "\n".join(errors)
-    await interaction.response.send_message(msg)
+# Modale pour ajouter plusieurs contenus
+class AddMultiModal(discord.ui.Modal, title="Ajouter plusieurs contenus"):
+    entries = discord.ui.TextInput(
+        label="Entrées",
+        style=discord.TextStyle.long,
+        placeholder="One Piece, manga, en cours\nNaruto, manga, terminé\nDemon Slayer, anime, à voir/lire",
+        required=True
+    )
+    async def on_submit(self, interaction: discord.Interaction):
+        lines = self.entries.value.splitlines()
+        added = []
+        errors = []
+        for line in lines:
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) != 3:
+                errors.append(f"Ligne invalide (doit contenir 3 champs) : {line}")
+                continue
+            title, category, status = parts
+            if category.lower() not in CATEGORIES:
+                errors.append(f"Catégorie invalide pour '{title}' : {category}")
+                continue
+            if status.lower() not in STATUTS:
+                errors.append(f"Statut invalide pour '{title}' : {status}")
+                continue
+            try:
+                add_content(str(interaction.user.id), title, category.lower(), status.lower())
+                added.append(title)
+            except Exception as e:
+                errors.append(f"Erreur pour '{title}' : {str(e)}")
+        msg = ""
+        if added:
+            msg += "Ajoutés : " + ", ".join(added) + ".\n"
+        if errors:
+            msg += "Erreurs :\n" + "\n".join(errors)
+        await interaction.response.send_message(msg)
 
-@tree.command(name="updatemulti", description="Met à jour le statut de plusieurs contenus d'un coup. Chaque entrée doit être au format: titre, nouveau statut. Sépare les entrées par un point-virgule (;).")
-@app_commands.describe(
-    updates="Exemple: One Piece, terminé; Naruto, en cours"
-)
-async def updatemulti(interaction: discord.Interaction, updates: str):
-    items = [item.strip() for item in updates.split(";") if item.strip()]
-    updated = []
-    errors = []
-    for item in items:
-        parts = [part.strip() for part in item.split(",")]
-        if len(parts) != 2:
-            errors.append(f"L'entrée invalide (doit contenir 2 champs): {item}")
-            continue
-        title, new_status = parts
-        if new_status.lower() not in STATUTS:
-            errors.append(f"Statut invalide pour '{title}': {new_status}")
-            continue
-        try:
-            update_content_status(str(interaction.user.id), title, new_status.lower())
-            updated.append(title)
-        except Exception as e:
-            errors.append(f"Erreur pour '{title}': {str(e)}")
-    msg = ""
-    if updated:
-        msg += "Mises à jour effectuées pour : " + ", ".join(updated) + ".\n"
-    if errors:
-        msg += "Erreurs :\n" + "\n".join(errors)
-    await interaction.response.send_message(msg)
+@tree.command(name="addmulti", description="Ouvre une fenêtre pour ajouter plusieurs contenus en une fois.")
+async def addmulti(interaction: discord.Interaction):
+    modal = AddMultiModal()
+    await interaction.response.send_modal(modal)
 
-@tree.command(name="removemulti", description="Supprime plusieurs contenus d'un coup. Fournis une liste de titres séparés par des virgules.")
-@app_commands.describe(
-    titles="Exemple: One Piece, Naruto, Demon Slayer"
-)
-async def removemulti(interaction: discord.Interaction, titles: str):
-    items = [item.strip() for item in titles.split(",") if item.strip()]
-    removed = []
-    errors = []
-    for title in items:
-        try:
-            remove_content(str(interaction.user.id), title)
-            removed.append(title)
-        except Exception as e:
-            errors.append(f"Erreur pour '{title}': {str(e)}")
-    msg = ""
-    if removed:
-        msg += "Supprimés : " + ", ".join(removed) + ".\n"
-    if errors:
-        msg += "Erreurs :\n" + "\n".join(errors)
-    await interaction.response.send_message(msg)
+# Modale pour mettre à jour plusieurs contenus
+class UpdateMultiModal(discord.ui.Modal, title="Mettre à jour plusieurs contenus"):
+    updates = discord.ui.TextInput(
+        label="Mises à jour",
+        style=discord.TextStyle.long,
+        placeholder="One Piece, terminé\nNaruto, en cours",
+        required=True
+    )
+    async def on_submit(self, interaction: discord.Interaction):
+        lines = self.updates.value.splitlines()
+        updated = []
+        errors = []
+        for line in lines:
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) != 2:
+                errors.append(f"Ligne invalide (doit contenir 2 champs) : {line}")
+                continue
+            title, new_status = parts
+            if new_status.lower() not in STATUTS:
+                errors.append(f"Statut invalide pour '{title}' : {new_status}")
+                continue
+            try:
+                update_content_status(str(interaction.user.id), title, new_status.lower())
+                updated.append(title)
+            except Exception as e:
+                errors.append(f"Erreur pour '{title}' : {str(e)}")
+        msg = ""
+        if updated:
+            msg += "Mises à jour effectuées pour : " + ", ".join(updated) + ".\n"
+        if errors:
+            msg += "Erreurs :\n" + "\n".join(errors)
+        await interaction.response.send_message(msg)
+
+@tree.command(name="updatemulti", description="Ouvre une fenêtre pour mettre à jour plusieurs contenus en une fois.")
+async def updatemulti(interaction: discord.Interaction):
+    modal = UpdateMultiModal()
+    await interaction.response.send_modal(modal)
+
+# Modale pour supprimer plusieurs contenus
+class RemoveMultiModal(discord.ui.Modal, title="Supprimer plusieurs contenus"):
+    titles = discord.ui.TextInput(
+        label="Titres",
+        style=discord.TextStyle.long,
+        placeholder="One Piece\nNaruto\nDemon Slayer",
+        required=True
+    )
+    async def on_submit(self, interaction: discord.Interaction):
+        lines = self.titles.value.splitlines()
+        removed = []
+        errors = []
+        for title in lines:
+            title = title.strip()
+            if not title:
+                continue
+            try:
+                remove_content(str(interaction.user.id), title)
+                removed.append(title)
+            except Exception as e:
+                errors.append(f"Erreur pour '{title}' : {str(e)}")
+        msg = ""
+        if removed:
+            msg += "Supprimés : " + ", ".join(removed) + ".\n"
+        if errors:
+            msg += "Erreurs :\n" + "\n".join(errors)
+        await interaction.response.send_message(msg)
+
+@tree.command(name="removemulti", description="Ouvre une fenêtre pour supprimer plusieurs contenus en une fois.")
+async def removemulti(interaction: discord.Interaction):
+    modal = RemoveMultiModal()
+    await interaction.response.send_modal(modal)
 
 @client.event
 async def on_ready():
-    # Synchronisation globale des commandes slash
-    await tree.sync()
+    await tree.sync()  # Synchronisation globale des commandes slash
     print(f"{client.user} est connecté et les commandes slash sont synchronisées.")
 
 client.run(DISCORD_TOKEN)
